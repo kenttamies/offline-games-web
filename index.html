@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <!-- viewport-fit=cover + the safe-area padding below keep the app clear of the notch and home bar. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+    <title>Offline Games</title>
+    <meta name="description" content="Classic offline games: solitaire, sudoku, chess, mahjong and more.">
+    <meta name="theme-color" content="#14161B">
+    <!-- Private test build: keep it out of search engines. -->
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <meta name="referrer" content="no-referrer">
+
+    <!-- iPhone home-screen app settings. -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Offline Games">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="manifest" href="manifest.webmanifest">
+
+    <style>
+        html, body {
+            margin: 0; padding: 0; height: 100%; overflow: hidden;
+            background: #14161B; color: #F2F3F5;
+            font-family: -apple-system, system-ui, sans-serif;
+            -webkit-user-select: none; user-select: none;
+            -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+            overscroll-behavior: none; touch-action: none;
+        }
+        /* The app draws inside the safe area; the dark background fills the notch and home bar. */
+        #app {
+            position: fixed;
+            top: env(safe-area-inset-top); right: env(safe-area-inset-right);
+            bottom: env(safe-area-inset-bottom); left: env(safe-area-inset-left);
+        }
+        #splash { z-index: 5;
+            position: fixed; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 14px; font-size: 15px; opacity: .85;
+        }
+        #splash .logo { width: 72px; height: 72px; border-radius: 18px; }
+        #gate {
+            position: fixed; inset: 0; display: none; flex-direction: column; align-items: center;
+            justify-content: center; gap: 14px; padding: 24px; box-sizing: border-box; text-align: center;
+            z-index: 10; touch-action: manipulation; /* above the (empty) #app layer, which would eat taps */
+        }
+        #gate .logo { width: 72px; height: 72px; border-radius: 18px; }
+        #gate h1 { font-size: 22px; margin: 6px 0 0; }
+        #gate p { margin: 0; opacity: .7; font-size: 14px; }
+        #gate input {
+            width: 100%; max-width: 280px; padding: 14px 16px; border-radius: 14px; border: 1px solid #3a3f4b;
+            background: #1D2027; color: #F2F3F5; font-size: 18px; text-align: center; letter-spacing: 2px;
+            -webkit-user-select: text; user-select: text; outline: none;
+        }
+        #gate button {
+            width: 100%; max-width: 280px; padding: 14px; border: 0; border-radius: 28px;
+            background: #FFC94D; color: #241A00; font-size: 17px; font-weight: 600;
+        }
+        #gate .error { color: #ff7b7b; min-height: 18px; font-size: 14px; }
+    </style>
+</head>
+<body>
+<div id="splash"><img class="logo" src="icons/icon-192.png" alt=""><div>Loading…</div></div>
+<form id="gate" autocomplete="off">
+    <img class="logo" src="icons/icon-192.png" alt="">
+    <h1>Offline Games</h1>
+    <p>Private test build. Enter the passcode.</p>
+    <input id="code" type="password" inputmode="text" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Passcode">
+    <button type="submit">Open</button>
+    <div class="error" id="err"></div>
+</form>
+<div id="app"></div>
+<script>
+    // Offline support: the service worker caches the whole app after the first visit.
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    }
+    // The app calls this once its first screen is ready.
+    window.hideSplash = () => { const s = document.getElementById("splash"); if (s) s.remove(); };
+
+    // Passcode gate for the private test build. Only a SHA-256 hash of the passcode is
+    // published (filled in by scripts/pwa-postbuild.mjs); a device that entered it once
+    // remembers it. Local testing (localhost / home network) skips the gate.
+    const PASS_HASH = "ae5deb822e0d71992900471a7199d0d95b8e7c9d05c40a8245a281fd2c1d6684";
+    const KEY = "og_pass";
+    const local = /^(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+
+    function startApp() {
+        const s = document.createElement("script");
+        s.src = "offlinegames.js";
+        document.body.appendChild(s);
+    }
+    async function sha256(text) {
+        const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+        return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+    function remembered() { try { return localStorage.getItem(KEY) === PASS_HASH; } catch (e) { return false; } }
+
+    if (local || PASS_HASH.startsWith("__") || remembered()) {
+        startApp();
+    } else {
+        document.getElementById("splash").style.display = "none";
+        const gate = document.getElementById("gate");
+        gate.style.display = "flex";
+        gate.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const code = document.getElementById("code").value.trim().toLowerCase();
+            if (code && (await sha256(code)) === PASS_HASH) {
+                try { localStorage.setItem(KEY, PASS_HASH); } catch (err) {}
+                gate.remove();
+                document.getElementById("splash").style.display = "flex";
+                startApp();
+            } else {
+                document.getElementById("err").textContent = "That's not it. Try again.";
+            }
+        });
+    }
+</script>
+</body>
+</html>
